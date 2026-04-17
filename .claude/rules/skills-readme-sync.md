@@ -8,4 +8,4 @@ Whenever you modify anything under `skills/**`, decide whether the change is use
 
 Per rule-001, the two READMEs must stay in lockstep: update both or neither.
 
-Enforcement: `.harness/hooks/check-skills-readme.sh` run by the `pre-commit` git hook prints a **non-blocking** warning when `skills/**` is staged without either README. The check is advisory (always exits 0) — you may proceed with the commit and ignore the nudge for genuine internal changes.
+Enforcement: `.harness/hooks/stop/check-skills-readme.sh` runs as a Claude Code **Stop** hook. When your turn ends with uncommitted `skills/**` changes but no README edits, it prints a non-blocking reminder (exits 0) so you can review before the next turn or commit. There is intentionally no git-hook backstop for this rule because the decision is semantic and should not block human committers.

@@ -71,9 +71,9 @@ rules:
     severity: warn
     scope:
       glob: "skills/**"
-      trigger: commit
+      trigger: stop
     examples:
       good: "Adding a new Skill also adds an install block and trigger-phrase row to both READMEs. Renaming a Skill updates every README mention in the same commit."
       bad: "Skill behavior or trigger phrases change but the READMEs still describe the old state — new users get wrong instructions."
     exceptions: "Pure internal refactors with no user-visible change (typo in a reference file, restructuring templates/ without changing its public shape)."
-    check: ".harness/hooks/check-skills-readme.sh"
+    check: ".harness/hooks/stop/check-skills-readme.sh"

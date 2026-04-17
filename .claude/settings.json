@@ -1,0 +1,23 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": ".harness/hooks/post-tool/check-readme-sync.sh" },
+          { "type": "command", "command": ".harness/hooks/post-tool/check-harness-tag.sh" },
+          { "type": "command", "command": ".harness/hooks/post-tool/check-skill-refs.sh" },
+          { "type": "command", "command": ".harness/hooks/post-tool/check-skill-english.sh" }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": ".harness/hooks/stop/check-skills-readme.sh" }
+        ]
+      }
+    ]
+  }
+}

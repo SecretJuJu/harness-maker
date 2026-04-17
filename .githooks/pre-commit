@@ -8,8 +8,7 @@ for script in \
   .harness/hooks/check-readme-sync.sh \
   .harness/hooks/check-harness-tag.sh \
   .harness/hooks/check-skill-refs.sh \
-  .harness/hooks/check-skill-english.sh \
-  .harness/hooks/check-skills-readme.sh
+  .harness/hooks/check-skill-english.sh
 do
   if [ -x "$script" ]; then
     if ! "$script"; then
