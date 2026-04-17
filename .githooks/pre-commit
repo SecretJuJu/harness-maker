@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# harness: dispatcher
+# Runs each .harness/hooks/check-*.sh for pre-commit scope; aggregates failures.
+# Budget: <2s. Early-exit in each check script when no relevant files are staged.
+
+failed=0
+for script in \
+  .harness/hooks/check-readme-sync.sh \
+  .harness/hooks/check-harness-tag.sh \
+  .harness/hooks/check-skill-refs.sh
+do
+  if [ -x "$script" ]; then
+    if ! "$script"; then
+      failed=1
+    fi
+  fi
+done
+
+exit $failed

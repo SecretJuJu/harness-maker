@@ -1,0 +1,79 @@
+# .harness/rules.yaml
+#
+# 이 파일에 프로젝트의 코딩 규칙을 선언합니다.
+# LLM 에이전트에게 "하네스 구성해줘"하면 이 파일을 바탕으로
+# 린트 설정, git hooks, .claude/rules/ 등을 자동 생성합니다.
+#
+# 아래 예시 중 필요한 것만 주석을 풀어서 사용하세요.
+# 또는 에이전트에게 "하네스에 OOO 규칙 추가해"라고 말하면 됩니다.
+
+rules: []
+
+  # ── 커밋 ────────────────────────────────────────
+  # - id: rule-001
+  #   name: conventional-commits
+  #   description: "커밋 메시지는 Conventional Commits 형식"
+  #   severity: error
+  #   scope:
+  #     trigger: commit
+  #   pattern: '^(feat|fix|docs|style|refactor|test|chore|ci|perf|build)(\(.+\))?: .+'
+  #   examples:
+  #     good: "feat(auth): JWT 토큰 인증 구현"
+  #     bad: "로그인 수정함"
+
+  # ── 코드 스타일 ─────────────────────────────────
+  # - id: rule-002
+  #   name: prefer-function-keyword
+  #   description: "arrow function 대신 function 키워드 사용"
+  #   severity: warn
+  #   scope:
+  #     languages: [typescript]
+  #     glob: "src/**/*.ts"
+  #   examples:
+  #     good: "export function handleClick(e: Event) { ... }"
+  #     bad: "export const handleClick = (e: Event) => { ... }"
+  #   exceptions: "콜백이나 인라인 함수는 예외"
+
+  # - id: rule-003
+  #   name: no-default-export
+  #   description: "default export 금지, named export만 사용"
+  #   severity: error
+  #   scope:
+  #     languages: [typescript]
+  #     glob: "src/**/*.ts"
+  #   examples:
+  #     good: "export function foo() {}"
+  #     bad: "export default function foo() {}"
+
+  # ── import ──────────────────────────────────────
+  # - id: rule-004
+  #   name: no-relative-parent-import
+  #   description: "상위 디렉토리 상대경로 import 금지"
+  #   severity: error
+  #   scope:
+  #     languages: [typescript]
+  #     glob: "src/**/*.ts"
+  #   examples:
+  #     good: "import { Something } from '@app/lib'"
+  #     bad: "import { Something } from '../../lib'"
+
+  # ── 아키텍처 ────────────────────────────────────
+  # - id: rule-005
+  #   name: no-direct-db-in-controller
+  #   description: "Controller에서 Repository/DB 직접 접근 금지"
+  #   severity: warn
+  #   scope:
+  #     languages: [typescript]
+  #     glob: "src/**/*.controller.ts"
+  #   examples:
+  #     good: "constructor(private readonly userService: UserService)"
+  #     bad: "constructor(private readonly userRepo: UserRepository)"
+
+  # ── 테스트 ──────────────────────────────────────
+  # - id: rule-006
+  #   name: test-file-required
+  #   description: "src/ 파일에는 대응하는 테스트 파일이 있어야 함"
+  #   severity: warn
+  #   scope:
+  #     glob: "src/**/*.ts"
+  #   check: ".harness/hooks/check-test-files.sh"
