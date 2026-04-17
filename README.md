@@ -2,172 +2,53 @@
 
 # Harness
 
-A system that lets you declaratively define codebase rules and auto-configures your working environment to enforce them.
+Harness is a Claude Code Skill that lets you declaratively manage codebase rules via `.harness/rules.yaml` and auto-configures lint tools, git hooks, and Claude Code hooks to enforce them.
 
-## Usage
+## Install
 
-Paste this prompt into an LLM agent (Claude Code, Cursor, Copilot, etc.):
+This section is for LLM agents reading this document to help install the Harness Skill.
 
-```
-Read this document and set up harness for my project:
-https://raw.githubusercontent.com/{owner}/harness-maker/main/README.md
-```
+Before installing, **ask the user**: should this Skill be installed in the current project (scoped to `.claude/skills/harness-maker/` relative to their project root) or installed globally for all projects (`~/.claude/skills/harness-maker/`)?
 
----
+**Priority order:** If the same Skill name exists in both locations, Personal (`~/.claude/skills/`) takes precedence over Project.
 
-## Instructions for LLM agents
-
-> The following is for LLM agents reading this document.
-> It describes how to set up harness in the user's project.
-
-### What is harness
-
-You **declare** coding rules in `.harness/rules.yaml`, and harness **auto-configures**
-the project environment to enforce them.
-
-```
-.harness/rules.yaml  →  agent reads  →  lint config, git hooks,
-(declaration: what)      & configures     .claude/rules/, etc.
-                                          (implementation: how)
-```
-
-### Setup procedure
-
-#### 1. Inspect the project environment
-
-First, analyze the user's project:
+### Project-scoped install
 
 ```bash
-# Project root
-ls -la
-
-# Language & package manager
-ls package.json Cargo.toml pyproject.toml go.mod 2>/dev/null
-ls package-lock.json yarn.lock pnpm-lock.yaml bun.lockb 2>/dev/null
-
-# Linters/formatters
-ls .eslintrc* eslint.config.* biome.json .prettierrc* deno.json 2>/dev/null
-ls .ruff.toml ruff.toml clippy.toml .golangci.yml 2>/dev/null
-
-# Hook systems
-ls -la .husky/ .githooks/ .lefthook* .pre-commit-config.yaml 2>/dev/null
-
-# Claude configuration
-ls CLAUDE.md .claude/ 2>/dev/null
-
-# Existing harness
-cat .harness/rules.yaml 2>/dev/null
+mkdir -p .claude/skills
+cp -r /path/to/cloned/harness-maker/skills/harness-maker .claude/skills/
 ```
 
-#### 2. Create `.harness/rules.yaml`
+After copying, the Skill auto-loads on the next Claude Code session. The user can then invoke it by asking "set up harness", "하네스 설정해줘", or similar trigger phrases.
 
-Create a `.harness/` directory and `rules.yaml` at the project root.
+### Personal/global install
 
 ```bash
-mkdir -p .harness
+mkdir -p ~/.claude/skills
+cp -r /path/to/cloned/harness-maker/skills/harness-maker ~/.claude/skills/
 ```
 
-The schema of `rules.yaml` is:
-
-```yaml
-rules:
-  - id: rule-001
-    name: rule-name            # kebab-case
-    description: "Rule description"
-    severity: warn             # warn | error
-    scope:
-      languages: [typescript]  # Target languages (optional)
-      glob: "src/**/*.ts"      # Target file pattern (optional)
-      trigger: commit          # code | commit | push (optional)
-    pattern: 'regex'           # For string-matching rules (optional)
-    examples:
-      good: "good example code"
-      bad: "bad example code"
-    exceptions: "Exception notes"            # optional
-    check: ".harness/hooks/script.sh"        # Custom check script (optional)
-```
-
-**Ask the user which rules they want.**
-Feel free to suggest useful rules based on the project's environment.
-
-Commonly useful rule examples:
-- Commit message format (Conventional Commits, etc.)
-- Import path rules (no relative imports, use package names, etc.)
-- Code style (function declaration style, no default exports, etc.)
-- Architectural rules (dependency direction between layers, etc.)
-
-#### 3. Configure enforcement mechanisms per rule
-
-For each rule in `rules.yaml`, pick and configure an enforcement mechanism suited to the project.
-
-**Mechanism selection guide:**
-
-| Question | Mechanism |
-|----------|-----------|
-| Can it be caught by static analysis? | The project's lint tool (ESLint, Biome, Ruff, Clippy, etc.) |
-| Only relevant at commit/push time? | git hook (Husky, Lefthook, native, pre-commit, etc.) |
-| Semantic rule requiring LLM judgment? | Claude Code `prompt` hook |
-| Needs codebase exploration? | Claude Code `agent` hook |
-| Should Claude know when generating code? | `.claude/rules/` file |
-
-**Important:** It is common to combine several mechanisms for a single rule.
-- `.claude/rules/` = **advisory** (Claude may ignore it)
-- Lint tools, git hooks, Claude Code hooks = **enforced** (cannot be skipped)
-
-**Prefer existing tools.**
-If the project already has ESLint, add rules to ESLint; if Biome, add them to Biome.
-Introduce a new tool only with the user's consent.
-
-**Never overwrite existing configuration.**
-Append to existing content or adapt to existing patterns.
-
-For concrete implementation details per mechanism, see the `docs/` directory:
-- `docs/eslint.md` — ESLint flat/legacy config, no-restricted-syntax, custom rules
-- `docs/git-hooks.md` — Husky, Lefthook, native hooks, pre-commit (Python)
-- `docs/claude-integration.md` — .claude/rules/, Claude Code hooks (4 handler types)
-- `docs/custom-scripts.md` — Custom check scripts, patterns compatible with both git hooks and Claude Code hooks
-- `docs/performance.md` — Hook performance budgets, cost per handler type, optimization patterns
-
-#### 4. Create `.claude/rules/` files
-
-Create a Claude-facing rule file for each rule.
-Use the `examples` and `exceptions` fields from `rules.yaml`.
-
-```markdown
-<!-- .claude/rules/rule-name.md -->
----
-description: Rule description
-globs: "src/**/*.ts"
----
-
-# [Harness: rule-001] Rule name
-Rule description.
-
-- ✅ Good: `good example code`
-- ❌ Bad: `bad example code`
-- Exception: Exception notes
-```
-
-#### 5. Scan for violations and report
-
-Once setup is complete, scan the current code for violations.
-
-If there are many violations, present options to the user:
-- Batch-fix auto-fixable ones with `--fix`
-- Start with `severity: warn` and fix gradually
-- Narrow the scope so it applies only to new code
-
-#### 6. Report results to the user
-
-After completing setup, tell the user:
-- The list of added rules
-- Which mechanism enforces each rule
-- The current violation count (if any)
-- A reminder to commit `.harness/` to git
+After copying, the Skill auto-loads on the next Claude Code session and becomes available in every project the user opens. Trigger with "set up harness", "하네스 설정해줘", etc.
 
 ---
 
-### Responding to future user requests
+## What the Skill does once installed
+
+Once the Skill is installed, it can:
+
+- Detect your project environment (language, package manager, linter, hook system)
+- Create and maintain `.harness/rules.yaml` (your declarative rule list)
+- Wire rules to the right enforcement mechanism (lint tools / git hooks / Claude Code hooks / `.claude/rules/` advisory files)
+- Scan existing code for rule violations and report them
+- Handle requests to add, modify, or remove rules from your harness
+
+For the full setup procedure, see `skills/harness-maker/SKILL.md`.
+
+---
+
+## Responding to future user requests
+
+When the user interacts with the Skill, it handles these patterns:
 
 | User request | Action |
 |--------------|--------|
@@ -178,12 +59,8 @@ After completing setup, tell the user:
 | "Delete rule-003" | Remove from `rules.yaml` + clean up related configuration |
 | "Change rule-001 severity to error" | Update `rules.yaml` + propagate to related configuration |
 
-### Performance budgets
+---
 
-When writing hooks or scripts, follow these budgets:
-- pre-commit hook: under 2s
-- commit-msg hook: under 0.5s
-- Claude Code command hook: under 1s
-- Check only staged files, exit early, use lightweight tools
+## Performance budgets
 
-For detailed performance optimization, see `docs/performance.md`.
+Hooks must stay fast (pre-commit ≤ 2s, commit-msg ≤ 0.5s, Claude Code hook ≤ 1s) or they get bypassed. See `skills/harness-maker/references/performance.md` for details.
