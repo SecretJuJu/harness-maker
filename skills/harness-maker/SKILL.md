@@ -158,6 +158,7 @@ After completing setup, tell the user:
 - Which mechanism enforces each rule
 - The current violation count (if any)
 - A reminder to commit `.harness/` to git
+- A reminder that git-hook activation is **per-clone local state**: teammates who clone the repo must run the sibling `apply-harness` Skill (or the equivalent `git config core.hooksPath …` / `husky install` command) before the hooks fire on their machine
 
 ---
 
