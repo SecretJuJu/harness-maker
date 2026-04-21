@@ -25,9 +25,10 @@ while IFS= read -r link; do
   [ -z "$link" ] && continue
   target="$root/skills/harness-maker/$link"
   if [ ! -f "$target" ]; then
-    echo "harness[rule-003]: SKILL.md references missing file: $link (expected at $target)"
+    echo "harness[rule-003]: SKILL.md references missing file: $link (expected at $target)" >&2
     fail=1
   fi
 done < <(grep -oE 'references/[A-Za-z0-9_.-]+\.md' "$skill" | sort -u)
 
-exit $fail
+[ "$fail" -ne 0 ] && exit 2
+exit 0

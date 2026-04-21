@@ -30,5 +30,5 @@ if printf '%s\n' "$modified" | grep -qFx "$other"; then
   exit 0
 fi
 
-echo "harness[rule-001]: you edited $base — $other must be updated in the same change (dual-language contract)."
-exit 1
+echo "harness[rule-001]: you edited $base — $other must be updated in the same change (dual-language contract)." >&2
+exit 2

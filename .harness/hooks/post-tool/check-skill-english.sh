@@ -34,8 +34,10 @@ case "$file_path" in
 esac
 
 if [ -n "$hits" ]; then
-  echo "harness[rule-005]: $file_path contains non-English (Hangul/Han/Kana) — Skill content must be English (frontmatter exempt)."
-  printf '%s\n' "$hits"
-  exit 1
+  {
+    echo "harness[rule-005]: $file_path contains non-English (Hangul/Han/Kana) — Skill content must be English (frontmatter exempt)."
+    printf '%s\n' "$hits"
+  } >&2
+  exit 2
 fi
 exit 0

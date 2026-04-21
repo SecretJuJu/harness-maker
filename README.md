@@ -2,7 +2,7 @@
 
 # Harness
 
-Harness is a pair of Claude Code Skills that let you declaratively manage codebase rules via `.harness/rules.yaml` and auto-configure lint tools, git hooks, and Claude Code hooks to enforce them.
+Harness is a pair of Claude Code Skills that let you declaratively manage codebase rules via `.harness/rules.yaml` and auto-configure the right enforcement per rule — task-scoped procedures become Skills, code constraints become lint rules, semantic checks become Claude Code hooks, and repo-state rules become git hooks.
 
 - **`harness-maker`** — for the maintainer who sets up or evolves the harness (adds rules, wires enforcement, scans violations).
 - **`apply-harness`** — for contributors who clone the repo and need to activate the shared harness on their local machine (git hooks are per-clone state and do not travel with the repo).
@@ -45,7 +45,7 @@ After copying, both Skills auto-load on the next Claude Code session and become 
 
 - Detect your project environment (language, package manager, linter, hook system)
 - Create and maintain `.harness/rules.yaml` (your declarative rule list)
-- Wire rules to the right enforcement mechanism (lint tools / git hooks / Claude Code hooks / `.claude/rules/` advisory files)
+- Wire rules to the right enforcement mechanism — generating a Skill for task-scoped procedure rules, a lint rule for always-on code constraints, a Claude Code hook for semantic checks, a git hook for repo/commit-state rules, and `.claude/rules/` advisory files for Claude-facing reinforcement
 - Scan existing code for rule violations and report them
 - Handle requests to add, modify, or remove rules from your harness
 

@@ -1,239 +1,295 @@
-# 커스텀 린트 스크립트 기반 규칙 강제
+# Custom check scripts — authoring and wiring
 
-## 언제 사용하나
+Deterministic enforcement for rules that the project's lint tool cannot express.
+Check scripts are invoked from git hooks, from Claude Code hooks, or directly from
+the CLI, ideally all three from the same file.
 
-- ESLint 등 기존 도구로 표현하기 어려운 **프로젝트 고유 규칙**
-- **파일 구조/디렉토리 규칙** (예: feature 폴더에는 반드시 index.ts가 있어야 함)
-- **파일 간 관계 규칙** (예: 각 컴포넌트에 대응하는 테스트 파일 필수)
-- **복잡한 패턴 매칭** (여러 파일에 걸친 규칙)
-- **비코드 파일 규칙** (README 필수, 특정 설정 파일 존재 여부 등)
-- **린트 도구 레퍼런스가 없는 언어** — Biome, Ruff 등의 레퍼런스가 없는
-  언어/도구 조합에서는 커스텀 스크립트가 주요 강제 수단이 될 수 있다.
-  예: 특정 언어의 코딩 컨벤션을 grep/awk로 검사하는 방식.
+## When to use a check script
 
-## 스크립트 위치
+- The rule cannot be expressed in the project's lint tool (ESLint, Biome, Ruff, Clippy).
+- The rule concerns **file structure / directory layout** (e.g. "every `features/*` directory must contain `index.ts`").
+- The rule concerns **cross-file relationships** (e.g. "every component file has a corresponding test file").
+- The rule concerns **non-code artifacts** (README presence, config files, filename conventions, bilingual-doc sync).
+- The target language has no linter reference implementation — `grep`/`awk` on file contents is the fallback.
+
+The script is the deterministic enforcement; `.claude/rules/*.md` stays as the advisory companion.
+
+## File layout
 
 ```
 .harness/
   hooks/
-    check-<rule-name>.sh    # 개별 규칙 스크립트
-    check-all.sh             # 전체 규칙 실행기
+    check-<rule-name>.sh         # one script per rule
+    post-tool/                   # optional: Claude Code PostToolUse wrappers
+      check-<rule-name>.sh
+    stop/                        # optional: Claude Code Stop wrappers
+      check-<rule-name>.sh
 ```
 
-`hooks/` 디렉토리 하나에 모든 스크립트를 둔다.
-같은 스크립트를 Claude Code hook과 git hook 양쪽에서 참조할 수 있다.
+Keep a single script per rule so the `[Harness: rule-XXX]` tag maps 1:1 to a
+file (rule-002 traceability) and rule deletion is `rm` of one script plus the
+matching `settings.json` entry.
 
-## 스크립트 템플릿
+## Authoring principles
 
-### Bash 스크립트 (단순 패턴)
+- **Exit codes** — see "Hook exit code contract" below:
+  - `0` = pass.
+  - `2` = blocking error; stderr is fed back to Claude / aborts the git action.
+  - `1` = non-blocking error; stderr only reaches the debug log. Rarely what
+    you want for enforcement.
+- **Output on stderr**, not stdout. Exit-2 feedback flows through stderr; stdout
+  is reserved for optional JSON output (see below).
+- **Quote file + line** of every violation so Claude and humans can jump to it.
+- **Performance budget**: pre-commit ≤2s, commit-msg ≤0.5s, Claude Code hook ≤1s.
+  See `performance.md`.
+- **Staged-file optimization**: accept file paths via argv/stdin; default to
+  `git diff --cached --name-only --diff-filter=ACM` when invoked with no args.
+  Never scan the whole repo unless explicitly requested.
+- **Executable bit**: `chmod +x` is load-bearing. Unset permissions silently
+  break hooks.
+- **Idempotent**: repeated runs produce the same result; no disk writes.
+- **Rule tag**: `# harness: rule-XXX` header comment (rule-002).
+
+## Dual-mode scripts — one file, two callers
+
+A check script should run from both a git hook (stdin is a TTY, file list from
+argv or `git diff --cached`) and a Claude Code hook (stdin is JSON with
+`tool_input.file_path`). Detecting the caller lets one script serve both and
+keeps the `[Harness: rule-XXX]` 1:1 mapping clean.
 
 ```bash
 #!/usr/bin/env bash
-# .harness/hooks/check-no-arrow-exports.sh
-# Harness rule-001: export된 arrow function 감지
+# harness: rule-001
+# check-no-arrow-exports.sh — works as git hook AND Claude Code PostToolUse hook
 set -euo pipefail
 
-ERRORS=0
-TARGET_GLOB="${1:-src/**/*.ts}"
-
-for file in $(find src -name "*.ts" -o -name "*.tsx" 2>/dev/null); do
-  # export const xxx = (...) => 패턴 검출
-  matches=$(grep -nE "^export (const|let) \w+ = (\(|async \()" "$file" 2>/dev/null || true)
-  if [ -n "$matches" ]; then
-    echo "⚠️  $file:"
-    echo "$matches" | while read -r line; do
-      echo "   $line"
-    done
-    ERRORS=$((ERRORS + 1))
-  fi
-done
-
-if [ $ERRORS -gt 0 ]; then
-  echo ""
-  echo "❌ ${ERRORS}개 파일에서 arrow function export가 발견되었습니다."
-  echo "   function 키워드를 사용해주세요: export function xxx() { ... }"
-  exit 1
-else
-  echo "✅ Arrow function export 규칙 통과"
-  exit 0
-fi
-```
-
-### Node.js 스크립트 (복잡한 로직)
-
-```javascript
-#!/usr/bin/env node
-// .harness/hooks/check-feature-structure.js
-// Harness rule-005: feature 디렉토리 구조 규칙
-
-const fs = require("fs");
-const path = require("path");
-
-const FEATURES_DIR = "src/features";
-const REQUIRED_FILES = ["index.ts", "types.ts"];
-
-let errors = 0;
-
-if (!fs.existsSync(FEATURES_DIR)) {
-  console.log("✅ features 디렉토리가 없으므로 스킵");
-  process.exit(0);
-}
-
-const features = fs.readdirSync(FEATURES_DIR, { withFileTypes: true })
-  .filter(d => d.isDirectory())
-  .map(d => d.name);
-
-for (const feature of features) {
-  const featurePath = path.join(FEATURES_DIR, feature);
-  for (const required of REQUIRED_FILES) {
-    const filePath = path.join(featurePath, required);
-    if (!fs.existsSync(filePath)) {
-      console.log(`⚠️  ${featurePath}/ 에 ${required}가 없습니다.`);
-      errors++;
-    }
-  }
-}
-
-if (errors > 0) {
-  console.log(`\n❌ ${errors}개 위반 발견. 각 feature 폴더에는 ${REQUIRED_FILES.join(", ")}이 필요합니다.`);
-  process.exit(1);
-} else {
-  console.log("✅ Feature 구조 규칙 통과");
-  process.exit(0);
-}
-```
-
-## 전체 규칙 실행기
-
-모든 하네스 스크립트를 한 번에 실행하는 러너.
-
-```bash
-#!/usr/bin/env bash
-# .harness/hooks/check-all.sh
-# 모든 하네스 커스텀 규칙 실행
-set -uo pipefail
-
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-FAIL=0
-
-echo "🔍 하네스 규칙 검사 시작..."
-echo ""
-
-for script in "$SCRIPT_DIR"/check-*.sh; do
-  [ "$script" = "$SCRIPT_DIR/check-all.sh" ] && continue
-  [ ! -x "$script" ] && continue
-
-  RULE_NAME=$(basename "$script" .sh | sed 's/^check-//')
-  echo "━━━ $RULE_NAME ━━━"
-
-  if ! bash "$script"; then
-    FAIL=$((FAIL + 1))
-  fi
-  echo ""
-done
-
-# Node.js 스크립트도 실행
-for script in "$SCRIPT_DIR"/check-*.js; do
-  [ ! -f "$script" ] && continue
-
-  RULE_NAME=$(basename "$script" .js | sed 's/^check-//')
-  echo "━━━ $RULE_NAME ━━━"
-
-  if ! node "$script"; then
-    FAIL=$((FAIL + 1))
-  fi
-  echo ""
-done
-
-if [ $FAIL -gt 0 ]; then
-  echo "❌ ${FAIL}개 규칙 위반 발견"
-  exit 1
-else
-  echo "✅ 모든 하네스 규칙 통과"
-  exit 0
-fi
-```
-
-## git hook과 연동
-
-커스텀 스크립트를 pre-commit hook에서 실행:
-
-```bash
-# .husky/pre-commit (또는 .githooks/pre-commit)
-#!/usr/bin/env sh
-
-# 하네스 커스텀 규칙 검사
-if [ -x .harness/hooks/check-all.sh ]; then
-  .harness/hooks/check-all.sh
-fi
-```
-
-## 스크립트 작성 원칙
-
-- **exit code**: 0=통과, 1=실패
-- **출력**: 위반 파일과 줄 번호를 명확히 표시
-- **성능**: staged 파일만 대상으로 하는 옵션 제공 (인자로 파일 목록 받기)
-- **실행 권한**: `chmod +x` 필수
-- **주석**: 스크립트 상단에 `# harness: rule-XXX` 형태로 어떤 규칙인지 표기
-- **멱등성**: 여러 번 실행해도 같은 결과
-
-## Claude Code hook에서 커스텀 스크립트 사용
-
-같은 스크립트를 git hook과 Claude Code hook 양쪽에서 쓸 수 있게 만들면 좋다.
-차이점은 Claude Code hook은 **stdin으로 JSON**을 받고, git hook은 **인자나 환경변수**를 받는다는 것.
-
-### 양쪽 호환 패턴
-
-```bash
-#!/usr/bin/env bash
-# .harness/hooks/check-no-arrow-exports.sh
-# harness: rule-001
-# 사용: git hook에서 직접 실행 또는 Claude Code hook에서 stdin JSON으로 호출
-
-# Claude Code hook 컨텍스트인지 판별
 if [ -t 0 ]; then
-  # stdin이 터미널 → git hook이나 수동 실행
-  # 인자로 파일을 받거나 staged 파일 사용
-  FILES="${@:-$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null | grep -E '\.(ts|tsx)$')}"
+  # stdin is a terminal → git hook / manual CLI invocation
+  files="${*:-$(git diff --cached --name-only --diff-filter=ACM | grep -E '\.(ts|tsx)$' || true)}"
 else
-  # stdin이 파이프 → Claude Code hook
-  INPUT=$(cat)
-  FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.path // empty' 2>/dev/null)
-  [ -z "$FILE_PATH" ] && exit 0
-  FILES="$FILE_PATH"
+  # stdin is a pipe → Claude Code hook; parse JSON payload
+  input=$(cat)
+  file_path=$(printf '%s' "$input" | python3 -c \
+    'import json,sys; d=json.load(sys.stdin); print(d.get("tool_input",{}).get("file_path",""))' 2>/dev/null || true)
+  files="$file_path"
 fi
 
-[ -z "$FILES" ] && exit 0
+[ -z "$files" ] && exit 0
 
-ERRORS=0
-for file in $FILES; do
-  [[ ! "$file" =~ \.(ts|tsx)$ ]] && continue
-  [ ! -f "$file" ] && continue
+errors=0
+for file in $files; do
+  [[ "$file" =~ \.(ts|tsx)$ ]] || continue
+  [ -f "$file" ] || continue
   matches=$(grep -nE "^export (const|let) \w+ = (\(|async \()" "$file" 2>/dev/null || true)
   if [ -n "$matches" ]; then
-    echo "⚠️  $file:"
-    echo "$matches"
-    ERRORS=$((ERRORS + 1))
+    {
+      printf 'harness[rule-001] %s:\n%s\n' "$file" "$matches"
+      echo "  fix: declare with 'function' instead of an arrow export."
+    } >&2
+    errors=$((errors + 1))
   fi
 done
 
-if [ $ERRORS -gt 0 ]; then
-  echo "❌ Arrow function export 발견. function 키워드를 사용하세요."
-  exit 1
-fi
+[ "$errors" -gt 0 ] && exit 2
 exit 0
 ```
 
-이 스크립트를 `.claude/settings.json`과 git hook 양쪽에서 참조할 수 있다:
+## Wiring scripts to Claude Code hooks
+
+### Recommended pattern
+
+After reviewing the official reference (`https://code.claude.com/docs/en/hooks`)
+and the main open-source exemplars
+(`disler/claude-code-hooks-mastery`,
+`smykla-skalski/klaudiush`,
+`disler/claude-code-hooks-multi-agent-observability`) as of 2026-04, the
+community-consensus shape for an enforcement harness is:
+
+**one broad `matcher` per tool family → one handler per rule, each scoped with `if` → one script per rule.**
+
+The engine already dispatches, **deduplicates identical `command` strings**, and
+runs matched handlers in parallel — a custom fan-out dispatcher is redundant.
 
 ```json
 // .claude/settings.json
-{ "hooks": { "PostToolUse": [{ "matcher": "Edit|Write", "hooks": [
-  { "type": "command", "command": ".harness/hooks/check-no-arrow-exports.sh" }
-]}]}}
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Edit(*.ts)",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.harness/hooks/check-no-arrow-exports.sh"
+          },
+          {
+            "type": "command",
+            "if": "Write(scheme/*.sql)",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.harness/hooks/check-scheme-filename.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
 ```
 
+Rules of thumb:
+
+- **Broad matcher**, **narrow `if`**. `matcher` filters tool name only; `if`
+  gates process startup — the script doesn't spawn when `if` does not match.
+- Reference scripts with **`$CLAUDE_PROJECT_DIR`** so paths resolve regardless
+  of cwd. Quote it because the path may contain spaces:
+  `"\"$CLAUDE_PROJECT_DIR\"/.harness/hooks/…"`.
+- Same `command` string under multiple matcher blocks is **deduped
+  automatically** — safe to register the same script across events.
+- Handlers under one matcher run **in parallel**; assume no ordering.
+
+### `if` field syntax and limits
+
+The `if` field uses Claude Code **permission-rule syntax** — the same grammar
+as the permission allow-list — **not** shell glob and **not** regex.
+
+| Pattern | What it matches |
+|---------|-----------------|
+| `Edit(*.ts)` | `tool_input.file_path` whose **basename** matches `*.ts` |
+| `Write(scheme/*)` | `file_path` whose path matches `scheme/*` at one level |
+| `Bash(git push *)` | any parsed subcommand matches `git push *` |
+| `mcp__memory__.*` | (matcher only, regex) tool name match |
+
+Constraints:
+
+- **`**` does NOT recurse across directory boundaries.** The pattern grammar is
+  flat. For recursive path filters, parse `tool_input.file_path` inside the
+  script and early-exit.
+- **One rule per `if`.** No `&&` / `||` / lists. For multiple conditions,
+  register multiple handler entries.
+- **`if` is evaluated only on tool events**: `PreToolUse`, `PostToolUse`,
+  `PostToolUseFailure`, `PermissionRequest`. On other events (`Stop`,
+  `UserPromptSubmit`, `SessionStart`, …) a handler with `if` set **never
+  runs** — filter inside the script instead.
+- **Unparseable Bash commands always match.** Never rely on `if` alone as a
+  deny gate; re-parse `tool_input.command` in the script for deny rules.
+- **Leading `VAR=value` is stripped** before Bash subcommand matching, so
+  `Bash(git push *)` matches `FOO=bar git push …`. Compound commands like
+  `npm test && git push` match any subcommand — be defensive.
+
+### Hook exit code contract
+
+| Exit | Universal meaning | PreToolUse effect | PostToolUse effect | Stop / UserPromptSubmit effect |
+|------|-------------------|-------------------|--------------------|--------------------------------|
+| `0`  | success; stdout parsed as JSON (see below) | allow | success | allow |
+| `2`  | blocking; stdout ignored, **stderr fed to Claude as error** | **denies tool** | feedback to Claude (tool already ran) | **blocks Stop** / erases prompt |
+| `1` or other | non-blocking log; stderr in debug log only | tool runs | tool effect stands | action continues |
+
+**Common misbelief to avoid:** `exit 1` is NOT the right signal for enforcement
+— Claude does not see the message on most events. For any hook that must
+surface feedback to Claude, use **exit 2** with the message on **stderr**.
+
+### JSON output — structured feedback (preferred for rich cases)
+
+Instead of stderr+exit-2, a hook may exit 0 with JSON on stdout. This is the
+cleanest shape for PostToolUse feedback and the only way to set
+`additionalContext`, `systemMessage`, or a PreToolUse `permissionDecision`:
+
 ```bash
-# .husky/pre-commit
-.harness/hooks/check-no-arrow-exports.sh
+cat <<'EOF'
+{
+  "decision": "block",
+  "reason": "harness[rule-001]: export arrow function in src/auth.ts:12 — use 'function' keyword."
+}
+EOF
+exit 0
 ```
+
+PreToolUse supports `{"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": "..."}}` for richer permission-style control. When multiple PreToolUse hooks return different decisions, precedence is `deny > defer > ask > allow`.
+
+Caps:
+- `additionalContext`, `systemMessage`, and plain stdout injected into Claude's
+  context are **limited to 10,000 characters**; longer output is saved to a
+  file and replaced with a preview. Keep messages focused.
+
+### Tool-family coverage — the Bash escape hatch
+
+A hook on `Edit|Write|MultiEdit` does not see Bash writes. If a rule forbids a
+filesystem state (forbidden file, filename pattern), cover the `Bash` family
+too:
+
+```json
+{ "matcher": "Edit|Write|MultiEdit|Bash", "hooks": [...] }
+```
+
+Otherwise Claude can bypass by writing via `Bash(cat > file <<EOF …)` heredocs
+or `Bash(echo ... > file)`.
+
+### Timeouts and async
+
+- `timeout` default: command=600s, prompt=30s, agent=60s. Override per handler.
+- `async: true` runs in background, never blocks Claude. Use only for logging,
+  metrics, or non-enforcement observers.
+- `asyncRewake: true` runs in background and wakes Claude on exit 2, feeding
+  stderr as a system reminder. Useful for long-running watchers (lint servers,
+  test runs).
+
+## Wiring scripts to git hooks
+
+Git hooks need a dispatcher because git's hook system has no built-in fan-out:
+one hook file per event. Compose the fan-out yourself.
+
+```bash
+#!/usr/bin/env bash
+# .githooks/pre-commit — harness dispatcher
+# Runs every .harness/hooks/check-*.sh sequentially; aggregates failures.
+set -uo pipefail
+
+failed=0
+for script in .harness/hooks/check-*.sh; do
+  [ -x "$script" ] || continue
+  "$script" || failed=1
+done
+exit $failed
+```
+
+Activate with `git config core.hooksPath .githooks`, or via Husky/Lefthook; see
+`git-hooks.md`.
+
+## When a dispatcher **is** warranted for Claude Code
+
+Reach for a custom dispatcher only when:
+
+- **Dynamic registration** — rules live outside `settings.json` (read from
+  `.harness/rules.yaml` at runtime) and the active set changes without
+  redeploying settings. Example pattern: `klaudiush` auto-registers validators
+  by predicate.
+- **Cross-event observability** — forwarding all 20+ hook events to one
+  endpoint / audit log. Example pattern:
+  `claude-code-hooks-multi-agent-observability`.
+- **Predicate logic `if` cannot express** — cross-file state, session-level
+  context, or regex that exceeds permission-rule grammar.
+
+For everyday enforcement harnesses, the built-in matcher + `if` + per-rule
+handler wiring is:
+- simpler (no dispatcher process spawn overhead),
+- preserves the `[Harness: rule-XXX]` 1:1 file-to-rule mapping,
+- lets the engine dedupe identical commands across matcher blocks and
+  parallelize unrelated handlers.
+
+## Cross-reference
+
+- `claude-integration.md` — full `.claude/rules/*.md` and Claude Code hook
+  conceptual reference (advisory vs enforced framing, SessionStart/Stop
+  advanced patterns).
+- `git-hooks.md` — Husky / Lefthook / native `.githooks/` / Python
+  `pre-commit` framework specifics.
+- `performance.md` — hook performance budgets and optimization patterns.
+
+## Sources
+
+- Claude Code hooks reference — `https://code.claude.com/docs/en/hooks`
+- Claude Code settings reference — `https://code.claude.com/docs/en/settings`
+- Claude Code permission rule syntax — `https://code.claude.com/docs/en/permissions`
+- Community exemplars:
+  `disler/claude-code-hooks-mastery` (per-event script pattern),
+  `smykla-skalski/klaudiush` (dispatcher + predicate-based validator registration),
+  `disler/claude-code-hooks-multi-agent-observability` (cross-event forwarder).

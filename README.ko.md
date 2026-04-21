@@ -2,7 +2,7 @@
 
 # Harness
 
-Harness는 한 쌍의 Claude Code Skill로, `.harness/rules.yaml`을 통해 선언적으로 코드베이스 규칙을 관리하고 린트 도구, git 후크, Claude Code 후크를 자동으로 구성하여 규칙을 적용합니다.
+Harness는 한 쌍의 Claude Code Skill로, `.harness/rules.yaml`을 통해 선언적으로 코드베이스 규칙을 관리하고 규칙의 성격에 맞는 강제 수단을 자동으로 구성합니다 — 작업 절차 규칙은 Skill로, 코드 제약은 린트 규칙으로, 의미적 판단은 Claude Code 후크로, 레포/커밋 상태 규칙은 git 후크로 연결합니다.
 
 - **`harness-maker`** — harness를 구성하거나 발전시키는 메인테이너용 (규칙 추가, 강제 메커니즘 연결, 위반 스캔).
 - **`apply-harness`** — 레포를 clone 한 뒤 로컬 머신에서 공유 harness를 활성화해야 하는 기여자용 (git 후크는 per-clone 상태이며 레포와 함께 따라오지 않습니다).
@@ -45,7 +45,7 @@ cp -r /path/to/cloned/harness-maker/skills/apply-harness ~/.claude/skills/
 
 - 프로젝트 환경 감지 (언어, 패키지 관리자, 린터, 후크 시스템)
 - `.harness/rules.yaml` 생성 및 유지 (선언적 규칙 목록)
-- 규칙을 올바른 강제 메커니즘으로 연결 (린트 도구 / git 후크 / Claude Code 후크 / `.claude/rules/` 권고 파일)
+- 규칙을 올바른 강제 메커니즘으로 연결 — 작업 단위 절차 규칙은 Skill로, 항상 적용되는 코드 제약은 린트 규칙으로, 의미적 판단이 필요한 규칙은 Claude Code 후크로, 레포/커밋 상태 규칙은 git 후크로, 그리고 Claude 측 보강용으로 `.claude/rules/` 권고 파일을 생성합니다
 - 기존 코드에서 규칙 위반 스캔 및 보고
 - 규칙 추가, 수정 또는 제거 요청 처리
 

@@ -68,11 +68,15 @@ rules:
   - id: rule-001
     name: rule-name            # kebab-case
     description: "Rule description"
+    kind: code-constraint      # task-procedure | code-constraint | repo-invariant (optional, see §3 Q1)
     severity: warn             # warn | error
     scope:
       languages: [typescript]  # Target languages (optional)
       glob: "src/**/*.ts"      # Target file pattern (optional)
-      trigger: commit          # code | commit | push (optional)
+      task_triggers:           # For kind: task-procedure — phrases that should invoke the Skill
+        - "design a table"
+        - "schema change"
+      trigger: commit          # code | commit | push (optional; repo-invariant rules only)
     pattern: 'regex'           # For string-matching rules (optional)
     examples:
       good: "good example code"
@@ -90,36 +94,138 @@ Commonly useful rule examples:
 - Code style (function declaration style, no default exports, etc.)
 - Architectural rules (dependency direction between layers, etc.)
 
-#### 3. Configure enforcement mechanisms per rule
+#### 3. Classify the rule, then pick the mechanism
 
-For each rule in `rules.yaml`, pick and configure an enforcement mechanism suited to the project.
+The most common failure mode is reaching for a pre-commit hook by default. Before
+configuring anything, **classify what kind of rule this actually is**. The rule's
+*nature* decides the primary mechanism; the question of *who violates* is a
+secondary, post-hoc question used only to decide whether to add a backstop.
 
-**Mechanism selection guide:**
+##### Q1 — Is this rule a *task-scoped procedure* rather than a *constraint on all code*?
 
-| Question | Mechanism |
-|----------|-----------|
-| Can it be caught by static analysis? | The project's lint tool (ESLint, Biome, Ruff, Clippy, etc.) |
-| Only relevant at commit/push time? | git hook (Husky, Lefthook, native, pre-commit, etc.) |
-| Semantic rule requiring LLM judgment? | Claude Code `prompt` hook |
-| Needs codebase exploration? | Claude Code `agent` hook |
-| Should Claude know when generating code? | `.claude/rules/` file |
+A task-scoped procedure is a *how-to* that applies only when a specific kind of
+work is being done. The trigger is **the task itself**, not a file pattern or
+a commit event.
 
-**Important:** It is common to combine several mechanisms for a single rule.
-- `.claude/rules/` = **advisory** (Claude may ignore it)
-- Lint tools, git hooks, Claude Code hooks = **enforced** (cannot be skipped)
+Examples:
+- "When designing a table, save SQL as `scheme/YYYYMMDD_TableName.sql`."
+- "When adding a new API endpoint, update `docs/api.md` and the Postman collection."
+- "When creating a React page, scaffold it from our template."
 
-**Prefer existing tools.**
-If the project already has ESLint, add rules to ESLint; if Biome, add them to Biome.
-Introduce a new tool only with the user's consent.
+These are not violations a scanner can catch after the fact — the question is
+*"did you follow the right procedure for this kind of work?"*, and often the
+violation is **absence** (forgot to create the artifact at all), which no
+pattern match can detect.
 
-**Never overwrite existing configuration.**
-Append to existing content or adapt to existing patterns.
+→ **Primary mechanism: a Skill** under `.claude/skills/<skill-name>/SKILL.md`.
+  The Skill's `description` carries the trigger phrases (`scope.task_triggers`
+  from `rules.yaml`) so Claude invokes it automatically *at task start*. The
+  Skill's body walks the agent through the procedure, preventing the violation
+  instead of detecting it later.
+  Pair with a `.claude/rules/*.md` advisory as a fallback for when the task
+  phrasing doesn't fire the Skill.
+
+See `references/skills.md` for the full Skill authoring pattern.
+
+If the rule isn't task-scoped, continue to Q2.
+
+##### Q2 — Is this rule an *always-on constraint* on code content?
+
+It applies to every file of a given kind, regardless of the task.
+
+Examples:
+- "No `any` in TypeScript."
+- "Functions declared with `function`, not arrow."
+- "No relative imports across `src/` boundaries."
+
+→ **Primary mechanism: the project's lint tool** (ESLint, Biome, Ruff, Clippy).
+  Editor integration gives feedback in milliseconds — faster than any hook.
+  Pair with `.claude/rules/*.md` so Claude writes it right the first time.
+
+If the rule isn't a content constraint, continue to Q3.
+
+##### Q3 — Is this rule about *repository / git state*?
+
+It only becomes meaningful at a git event.
+
+Examples:
+- "Commit messages follow Conventional Commits."
+- "No direct push to `main`."
+- "`README.md` and `README.ko.md` must change together."
+
+A lint tool can't see these; a Skill can't enforce them deterministically.
+
+→ **Primary mechanism: git hook** (`commit-msg`, `pre-commit`, `pre-push`).
+
+##### Q4 — Who produces violations? (backstop question, answered last)
+
+Only after the primary mechanism is chosen, decide whether a second line of
+defense is needed.
+
+| Primary producer | Backstop decision |
+|------------------|-------------------|
+| Claude (generation) | Add a `PostToolUse` or `Stop` Claude Code hook if the primary is advisory (Skill, `.claude/rules/`). |
+| Humans (typing) | Editor-integrated linter usually suffices. Add a git hook only if a miss must not reach the repo. |
+| Both | Combine Claude Code hook + git hook only when the rule is truly critical. |
+
+**Pre-commit is a last resort, not a default.** If a Skill, a lint rule, or a
+`PostToolUse` hook can catch the issue earlier, prefer those — violations
+caught at commit time have already cost the author their flow state, and the
+common reflex is to bypass with `--no-verify`.
+
+---
+
+##### Anti-patterns
+
+- ❌ **Treating every rule as a violation to catch at commit.** Many "rules"
+  are procedures; procedures belong in a Skill, invoked at task start.
+- ❌ **Reaching for `pre-commit` as the first answer.** It's the *last* line
+  of defense. Classify the rule first (Q1–Q3).
+- ❌ **Using `.claude/rules/` alone for a procedure.** Advisory files can
+  be ignored. A procedure rule needs a Skill so the task description itself
+  pulls Claude into the flow.
+- ❌ **Using a git hook to enforce *absence*.** If the violation is "you
+  forgot to create the file", a filename-regex pre-commit hook can't help —
+  there's nothing staged to inspect. Move the rule to a Skill.
+- ❌ **Skipping the lint tool when one exists.** If Biome/ESLint/Ruff is
+  already configured, route lint-able rules through it before writing a hook.
+
+---
+
+##### Rule archetype → mechanism cheat sheet
+
+| Archetype | Primary | Backstop |
+|-----------|---------|----------|
+| Task-scoped procedure (file placement, scaffolding, template-following) | **Skill** | `.claude/rules/` + `PostToolUse` filename/shape check |
+| Always-on code constraint (TS `no-any`, import rules, style) | **Lint rule** | `.claude/rules/` + optional `PostToolUse` grep |
+| Semantic code-quality (naming, design smell) | `.claude/rules/` + Claude Code `prompt` hook | — |
+| Cross-artifact consistency (test-per-module, doc-per-endpoint) | Claude Code `agent` hook (`PostToolUse` or `Stop`) | Git `pre-commit` if critical |
+| Commit-message / branch-name format | Git `commit-msg` / `pre-push` hook | `.claude/rules/` for Claude-authored commits |
+| Repository invariant (bilingual docs sync, forbidden files) | Git `pre-commit` hook | `.claude/rules/` advisory |
+
+---
+
+**Never overwrite existing configuration.** Append to existing content or adapt
+to existing patterns.
+
+**Prefer existing tools.** If the project already has ESLint, add rules to
+ESLint; if Biome, add them to Biome. Introduce a new tool only with the user's
+consent.
+
+**When wiring Claude Code hooks**, follow the community-consensus shape: one
+broad `matcher` per tool family, one handler per rule scoped with an `if`
+clause, one script per rule. Use **exit 2** (not exit 1) to surface feedback to
+Claude; parse `tool_input.file_path` in-script for recursive path predicates
+that the flat `if` grammar cannot express. Cover the `Bash` tool family when a
+rule forbids a filesystem state (otherwise `cat > file <<EOF` heredocs bypass
+Edit/Write hooks). See `references/custom-scripts.md` for the full contract.
 
 For concrete implementation details per mechanism, see the `references/` directory:
+- `references/skills.md` — Skill authoring for task-scoped procedure rules (primary mechanism for `kind: task-procedure`)
 - `references/eslint.md` — ESLint flat/legacy config, no-restricted-syntax, custom rules
 - `references/git-hooks.md` — Husky, Lefthook, native hooks, pre-commit (Python)
 - `references/claude-integration.md` — .claude/rules/, Claude Code hooks (4 handler types)
-- `references/custom-scripts.md` — Custom check scripts, patterns compatible with both git hooks and Claude Code hooks
+- `references/custom-scripts.md` — Check-script authoring + Claude Code hook wiring best practices (matcher/`if`/exit-code contract, dual-mode scripts, when a dispatcher is actually warranted)
 - `references/performance.md` — Hook performance budgets, cost per handler type, optimization patterns
 
 #### 4. Create `.claude/rules/` files

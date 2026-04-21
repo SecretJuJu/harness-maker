@@ -15,14 +15,14 @@ print(d.get("tool_input",{}).get("file_path",""))' 2>/dev/null)
 case "$file_path" in
   */.claude/rules/*.md)
     if ! grep -qE '\[Harness: rule-[0-9]+\]' "$file_path"; then
-      echo "harness[rule-002]: $file_path is missing '[Harness: rule-XXX]' tag in its body."
-      exit 1
+      echo "harness[rule-002]: $file_path is missing '[Harness: rule-XXX]' tag in its body." >&2
+      exit 2
     fi
     ;;
   */.harness/hooks/*.sh)
     if ! grep -qE '^# harness: rule-[0-9]+' "$file_path"; then
-      echo "harness[rule-002]: $file_path is missing '# harness: rule-XXX' header comment."
-      exit 1
+      echo "harness[rule-002]: $file_path is missing '# harness: rule-XXX' header comment." >&2
+      exit 2
     fi
     ;;
 esac
